@@ -1,8 +1,7 @@
-
 if __name__ == "__main__":
     from langchain_community.llms import VLLM
 
-    llm = VLLM(model="./local_model",
+    llm = VLLM(model="/workspace/local_model",
             trust_remote_code=True,  # mandatory for hf models
             max_new_tokens=128,
             top_k=10,

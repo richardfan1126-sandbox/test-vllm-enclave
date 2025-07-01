@@ -12,10 +12,17 @@ ENV VLLM_USE_V1=0
 
 RUN pip install langchain langchain_community -q
 
-RUN mkdir -p ./local_model
+RUN apt-get update && apt-get -y install net-tools
 
-COPY main.py .
+RUN mkdir -p /workspace
 
-COPY --from=downloader ./local_model ./local_model
+WORKDIR /workspace
 
-ENTRYPOINT ["python", "main.py"]
+RUN mkdir -p /workspace/local_model
+
+COPY main.py /workspace/main.py
+
+COPY --from=downloader ./local_model /workspace/local_model
+
+ENTRYPOINT ["/bin/bash", "-c", "ifconfig lo 127.0.0.1 && /opt/venv/bin/python /workspace/main.py"]
+# ENTRYPOINT ["/bin/bash"]
