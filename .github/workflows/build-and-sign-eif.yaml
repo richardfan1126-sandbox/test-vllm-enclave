@@ -2,8 +2,8 @@
 name: Build and sign EIF
 on:
   push:
-    branches:
-      - main
+    tags:
+      - "*"
 
 jobs:
   build_and_sign_eif:
@@ -13,7 +13,6 @@ jobs:
 
     permissions:
       contents: write
-      packages: write
       id-token: write
       attestations: write
 
@@ -30,75 +29,17 @@ jobs:
         shell: bash
         run: ${{ github.workspace }}/.github/workflows/scripts/build-eif.sh
 
-      - name: Setup oras
-        uses: oras-project/setup-oras@ee7dbe1144cb00080a89497f937dae78f85fce29  # oras-project/setup-oras@v1.1.0
+      - name: Github attest
+        id: github-attest
+        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be  # actions/attest-build-provenance@v2.4.0
         with:
-          version: 1.1.0
+          subject-path: '${{ steps.run-build-script.outputs.eif-file-path }}, ${{ steps.run-build-script.outputs.eif-info-path }}'
 
-      - name: Log into ghcr.io
-        uses: docker/login-action@343f7c4344506bcbf9b4de18042ae17996df046d  # docker/login-action@v3.0.0
+      - name: Upload to release
+        id: upload-to-release
+        uses: softprops/action-gh-release@72f2c25fcb47643c292f7107632f7a47c1df5cd8  # softprops/action-gh-release@v2.3.2
         with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ github.token }}
-
-      - name: Install Cosign
-        uses: sigstore/cosign-installer@e1523de7571e31dbe865fd2e80c5c7c23ae71eb4  # sigstore/cosign-installer@v3.4.0
-
-      - name: Push file to ghcr.io
-        id: push-file
-        shell: bash
-        env:
-          EIF_FILE_PATH: ${{ steps.run-build-script.outputs.eif-file-path }}
-          EIF_INFO_PATH: ${{ steps.run-build-script.outputs.eif-info-path }}
-          EIF_FILE_NAME: enclave.eif
-          EIF_INFO_FILE_NAME: enclave-info.json
-          ARTIFACT_TAG: ${{ github.sha }}
-          SAVE_PCRS_IN_ANNOTATION: true
-        run: |
-          WORKDIR="${{ github.workspace }}/artifact-push/"
-
-          mkdir ${WORKDIR}
-          cd ${WORKDIR}
-
-          cp "${EIF_FILE_PATH}" "${WORKDIR}/${EIF_FILE_NAME}"
-          cp "${EIF_INFO_PATH}" "${WORKDIR}/${EIF_INFO_FILE_NAME}"
-
-          mkdir tmp/
-
-          if [[ "${SAVE_PCRS_IN_ANNOTATION}" == "true" ]]; then
-            PCR0=$(jq -r ".Measurements.PCR0" ${WORKDIR}/${EIF_INFO_FILE_NAME})
-            PCR1=$(jq -r ".Measurements.PCR1" ${WORKDIR}/${EIF_INFO_FILE_NAME})
-            PCR2=$(jq -r ".Measurements.PCR2" ${WORKDIR}/${EIF_INFO_FILE_NAME})
-
-            oras push \
-              --export-manifest tmp/manifest.json \
-              --annotation "PCR0=${PCR0}" \
-              --annotation "PCR1=${PCR1}" \
-              --annotation "PCR2=${PCR2}" \
-              "ghcr.io/${{ github.repository }}:${ARTIFACT_TAG}" \
-              "${EIF_FILE_NAME}" \
-              "${EIF_INFO_FILE_NAME}"
-          else
-            oras push \
-              --export-manifest tmp/manifest.json \
-              "ghcr.io/${{ github.repository }}:${ARTIFACT_TAG}" \
-              "${EIF_FILE_NAME}" \
-              "${EIF_INFO_FILE_NAME}"
-          fi
-
-          DIGEST=$(sha256sum tmp/manifest.json | cut -d " " -f 1)
-
-          echo "digest=${DIGEST}" >> "${GITHUB_OUTPUT}"
-          echo "path=ghcr.io/${{ github.repository }}:${ARTIFACT_TAG}@sha256:${DIGEST}" >> "${GITHUB_OUTPUT}"
-
-      - name: Sign artifact
-        id: sign-artifact
-        shell: bash
-        env:
-          ARTIFACT_PATH: ${{ steps.push-file.outputs.path }}
-        run: |
-          RESPONSE=$(cosign sign --yes ${ARTIFACT_PATH} 2>&1)
-          echo "${RESPONSE}"
-          LOG_INDEX=$(echo "${RESPONSE}" | grep "tlog entry created with index: " | cut -d ":" -f 2 | tr -d " ")
-          echo "log-index=${LOG_INDEX}" >> "${GITHUB_OUTPUT}"
+          files: |
+            ${{ steps.run-build-script.outputs.eif-file-path }}
+            ${{ steps.run-build-script.outputs.eif-info-path }}
+            ${{ steps.github-attest.outputs.bundle-path }}
