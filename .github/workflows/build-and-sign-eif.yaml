@@ -2,8 +2,8 @@
 name: Build and sign EIF
 on:
   push:
-    tags:
-      - "*"
+    branches:
+      - main
 
 jobs:
   build_and_sign_eif:
@@ -20,6 +20,12 @@ jobs:
       - name: Check out repository code
         uses: actions/checkout@v4
 
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@b47578312673ae6fa5b5096b330d9fbac3d116df  # aws-actions/configure-aws-credentials@v4.2.1
+        with:
+          aws-region: ${{ vars.AWS_REGION }}
+          role-to-assume: ${{ vars.AWS_IAM_ROLE_ARN }}
+
       - name: Run build script
         id: run-build-script
         env:
@@ -35,11 +41,13 @@ jobs:
         with:
           subject-path: '${{ steps.run-build-script.outputs.eif-file-path }}, ${{ steps.run-build-script.outputs.eif-info-path }}'
 
-      - name: Upload to release
-        id: upload-to-release
-        uses: softprops/action-gh-release@72f2c25fcb47643c292f7107632f7a47c1df5cd8  # softprops/action-gh-release@v2.3.2
-        with:
-          files: |
-            ${{ steps.run-build-script.outputs.eif-file-path }}
-            ${{ steps.run-build-script.outputs.eif-info-path }}
-            ${{ steps.github-attest.outputs.bundle-path }}
+      - name: Upload artifacts to S3
+        id: upload-artifacts-to-s3
+        env:
+          S3_PREFIX: s3://${{ vars.S3_BUCKET_NAME }}/${{ github.sha }}/
+          AWS_REGION: ${{ vars.AWS_REGION }}
+        shell: bash
+        run: |
+          aws s3 cp ${{ steps.run-build-script.outputs.eif-file-path }} ${S3_PREFIX}
+          aws s3 cp ${{ steps.run-build-script.outputs.eif-info-path }} ${S3_PREFIX}
+          aws s3 cp ${{ steps.github-attest.outputs.bundle-path }} ${S3_PREFIX}
