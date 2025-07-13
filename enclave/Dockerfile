@@ -1,4 +1,5 @@
-ARG MODEL_NAME=deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B
+# ARG MODEL_NAME=TinyLlama/TinyLlama-1.1B-Chat-v1.0
+ARG MODEL_NAME=gpt2
 ARG TARGET=x86_64-unknown-linux-gnu
 
 
@@ -89,7 +90,8 @@ WORKDIR /app
 COPY app /app
 
 # Install Python dependency
-RUN pip install -r /app/requirements.txt
+RUN pip install pipenv==2025.0.4
+RUN pipenv install
 
 # Copy LLM model
 COPY --from=llm-downloader ./local_model /app/local_model
@@ -98,4 +100,7 @@ COPY --from=llm-downloader ./local_model /app/local_model
 COPY run.sh /app/run.sh
 RUN chmod +x /app/run.sh
 
-CMD ["/bin/sh", "-c", "/app/run.sh"]
+# Prevent download from Hugging Face Hub
+ENV HF_HUB_OFFLINE=1
+
+ENTRYPOINT ["/bin/sh", "-c", "/app/run.sh"]

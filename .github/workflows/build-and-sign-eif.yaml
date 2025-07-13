@@ -8,8 +8,10 @@ on:
 jobs:
   build_and_sign_eif:
     name: Build and sign EIF
-    runs-on:
-      group: large-nitro-enclave-build-runner-group
+
+    runs-on: ubuntu-latest
+    # runs-on:
+    #   group: large-nitro-enclave-build-runner-group
 
     permissions:
       contents: write

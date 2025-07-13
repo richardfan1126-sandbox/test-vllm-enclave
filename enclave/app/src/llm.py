@@ -1,37 +1,89 @@
-from langchain_community.llms import VLLM
-from langchain.chains import LLMChain
-from langchain_core.prompts import PromptTemplate
+from langchain_openai.chat_models.base import ChatOpenAI
+from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, SystemMessage
+from langgraph.checkpoint.memory import MemorySaver
+from langgraph.graph import START, MessagesState, StateGraph
+from transformers import AutoTokenizer
+
+# Define max tokens allowed for history
+MAX_TOKENS = 1024
+
+def _message_to_text(message: BaseMessage) -> str:
+    if isinstance(message, HumanMessage):
+        role = "user"
+    elif isinstance(message, AIMessage):
+        role = "assistant"
+    elif isinstance(message, SystemMessage):
+        role = "system"
+    else:
+        role = "unknown"
+    return f"{role}: {message.content}"
 
 class MyLLM:
     llm = None
+    tokenizer = None
+    workflow = None
+    memory = None
+    app = None
 
     def __init__(self):
-        # Initialize vLLM model via LangChain
-        self.llm = VLLM(model="/app/local_model",
-            trust_remote_code=True,  # mandatory for hf models
-            max_new_tokens=128,
-            top_k=10,
-            top_p=0.95,
-            temperature=0.8,
-            vllm_kwargs={
-                "swap_space": 2,
-                "device": "cpu",
-            },
-            # tensor_parallel_size=... # for distributed inference
+        self.llm = ChatOpenAI(
+            model="/app/local_model",
+            openai_api_key="token-abc123",
+            openai_api_base="http://127.0.0.1:8080/v1",
+            max_tokens=1024,
+            temperature=0,
         )
 
-    def chat(self, request: str) -> str:
+        self._init_workflow()
+        self._init_tokenizer()
+
+    def _init_tokenizer(self):
+        self.tokenizer = AutoTokenizer.from_pretrained("/app/local_model")
+
+    def _trim_message(self, messages):
+        trimmed = []
+        total_tokens = 0
+
+        for message in reversed(messages):
+            text = _message_to_text(message)
+            num_tokens = len(self.tokenizer.encode(text, add_special_tokens=False))
+            if total_tokens + num_tokens > MAX_TOKENS:
+                break
+            trimmed.insert(0, message)
+            total_tokens += num_tokens
+
+        return trimmed
+
+    def _init_workflow(self):
+        self.workflow = StateGraph(state_schema=MessagesState)
+        self.workflow.add_node("model", self._call_model)
+        self.workflow.add_edge(START, "model")
+
+        self.memory = MemorySaver()
+        self.app = self.workflow.compile(checkpointer=self.memory)
+
+    def _call_model(self, state: MessagesState):
+        trimmed_messages = self._trim_message(state["messages"])
+        response = self.llm.invoke(trimmed_messages)
+        return {"messages": response}
+
+    def chat(self, message: str, thread_id: str) -> str:
         if not self.llm:
             raise Exception("Local LLM not initialized.")
         
         try:
-            template = """Question: {question}
+            output = self.app.invoke(
+                {
+                    "messages": [HumanMessage(content=message)]
+                },
+                config={
+                    "configurable": {
+                        "thread_id": thread_id
+                    }
+                }
+            )
 
-            Answer: Let's think step by step."""
-            prompt = PromptTemplate.from_template(template)
-            llm_chain = LLMChain(prompt=prompt, llm=self.llm)
-            response = llm_chain.invoke(request)
-            return response["text"]
+            return output["messages"][-1].content
 
         except Exception as e:
             raise Exception(str(e))
